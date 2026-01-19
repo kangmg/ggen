@@ -23,6 +23,47 @@ from .phonons import (
 from .report import SystemExplorer, SystemReport, StabilityStats, SpaceGroupStats
 from .utils import parse_chemical_formula
 
+# GULP integration
+from .gulp_calculator import GULPCalculator, get_gulp_calculator
+from .data_collector import DataCollector, TrainingData, collect_from_cif_files
+from .robust_pipeline import (
+    RobustPipeline,
+    PipelineConfig,
+    SamplingConfig,
+    FilterConfig,
+    DataValidator,
+    DiversityFilter,
+    CheckpointManager,
+    run_pipeline,
+)
+
+# GULP Potential Fitting
+from .gulp_fitter import (
+    GULPFitter,
+    PotentialConfig,
+    ChargeModel,
+    PotentialType,
+    BuckinghamParams,
+    ShellParams,
+    QEqParams,
+    EEMParams,
+    FitTarget,
+    FitResult,
+    create_nbwo_shell_config,
+    create_nbwo_qeq_config,
+    fit_from_training_data,
+)
+
+# MLIP Data Collection with ASE DB
+from .mlip_collector import (
+    MLIPCollector,
+    CollectionConfig,
+    CollectionMode,
+    CollectionStats,
+    collect_from_cif_directory,
+    collect_for_gulp_fitting,
+)
+
 __version__ = "0.1.0"
 __author__ = "Matt Moderwell"
 __email__ = "matt@ouro.foundation"
@@ -60,4 +101,41 @@ __all__ = [
     # Cache management
     "get_space_group_cache_info",
     "clear_space_group_cache",
+    # GULP Calculator
+    "GULPCalculator",
+    "get_gulp_calculator",
+    # Data Collection
+    "DataCollector",
+    "TrainingData",
+    "collect_from_cif_files",
+    # Robust Pipeline
+    "RobustPipeline",
+    "PipelineConfig",
+    "SamplingConfig",
+    "FilterConfig",
+    "DataValidator",
+    "DiversityFilter",
+    "CheckpointManager",
+    "run_pipeline",
+    # GULP Potential Fitting
+    "GULPFitter",
+    "PotentialConfig",
+    "ChargeModel",
+    "PotentialType",
+    "BuckinghamParams",
+    "ShellParams",
+    "QEqParams",
+    "EEMParams",
+    "FitTarget",
+    "FitResult",
+    "create_nbwo_shell_config",
+    "create_nbwo_qeq_config",
+    "fit_from_training_data",
+    # MLIP Data Collection
+    "MLIPCollector",
+    "CollectionConfig",
+    "CollectionMode",
+    "CollectionStats",
+    "collect_from_cif_directory",
+    "collect_for_gulp_fitting",
 ]
