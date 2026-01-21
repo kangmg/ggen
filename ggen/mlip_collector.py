@@ -421,6 +421,135 @@ class MLIPCollector:
 
         return total
 
+    def collect_scaled_md(
+        self,
+        atoms: Atoms,
+        name: str = "scaled_md",
+        scale_factors: Optional[List[float]] = None,
+        temperatures: Optional[List[float]] = None,
+        n_steps: Optional[int] = None,
+        relax_scaled: bool = True,
+        relax_steps: int = 50,
+    ) -> int:
+        """
+        Collect MD trajectories on volume-scaled structures.
+
+        Scales the cell and atomic positions, optionally relaxes, then runs MD
+        at various temperatures. This generates diverse training data by
+        exploring different volumes/densities.
+
+        Args:
+            atoms: Initial structure
+            name: Base name for trajectories
+            scale_factors: List of volume scale factors (default: [0.90, 0.95, 1.05, 1.10])
+                          e.g., 0.9 = 10% compression, 1.1 = 10% expansion
+            temperatures: List of temperatures (K)
+            n_steps: MD steps per (scale, temperature) pair
+            relax_scaled: Whether to relax scaled structures before MD
+            relax_steps: Relaxation steps if relax_scaled=True
+
+        Returns:
+            Total structures collected
+
+        Example:
+            >>> collector.collect_scaled_md(atoms, scale_factors=[0.85, 0.95, 1.05, 1.15])
+        """
+        if scale_factors is None:
+            scale_factors = [0.90, 0.95, 1.05, 1.10]
+        
+        temperatures = temperatures or self.config.md_temperatures
+        n_steps = n_steps or self.config.md_steps_per_temp // 2  # Shorter MD per scale
+        
+        total = 0
+        
+        self._log(f"Scaled MD: {len(scale_factors)} scales × {len(temperatures)} temps")
+        
+        for scale in scale_factors:
+            # Scale cell and positions
+            scaled_atoms = atoms.copy()
+            scaled_atoms.set_cell(atoms.get_cell() * scale, scale_atoms=True)
+            
+            scale_name = f"{name}_s{scale:.2f}"
+            self._log(f"  Scale {scale:.2f}x (volume {scale**3:.2f}x)")
+            
+            # Optionally relax the scaled structure
+            if relax_scaled:
+                try:
+                    scaled_atoms.calc = self.calculator
+                    from ase.optimize import LBFGS
+                    opt = LBFGS(scaled_atoms, logfile=None)
+                    opt.run(fmax=0.5, steps=relax_steps)  # Quick relaxation
+                    
+                    # Store relaxed structure
+                    metadata = {"scale_factor": scale, "relaxed": True}
+                    if self._calculate_and_store(
+                        scaled_atoms, CollectionMode.OPTIMIZATION, 
+                        f"{scale_name}_relaxed", metadata
+                    ):
+                        total += 1
+                        self.stats.opt_structures += 1
+                except Exception as e:
+                    self._log(f"    Relaxation failed: {e}")
+            
+            # Run MD at each temperature on scaled structure
+            for temp in temperatures:
+                traj_name = f"{scale_name}_T{temp:.0f}K"
+                collected = self.collect_md_trajectory(
+                    scaled_atoms, temp, n_steps, traj_name
+                )
+                total += collected
+        
+        self._log(f"  Total from scaled MD: {total} structures")
+        return total
+
+    def collect_diverse(
+        self,
+        atoms: Atoms,
+        name: str = "diverse",
+        include_original: bool = True,
+        include_scaled: bool = True,
+        include_rattling: bool = True,
+        include_strain: bool = True,
+        scale_factors: Optional[List[float]] = None,
+    ) -> int:
+        """
+        Comprehensive diverse data collection combining multiple methods.
+
+        Args:
+            atoms: Initial structure
+            name: Base name
+            include_original: MD on original structure
+            include_scaled: MD on volume-scaled structures
+            include_rattling: Random displacements
+            include_strain: Strain perturbations
+
+        Returns:
+            Total structures collected
+        """
+        total = 0
+        
+        self._log(f"Diverse collection for: {name}")
+        
+        # Original structure MD
+        if include_original:
+            total += self.collect_md_temperatures(atoms, f"{name}_orig")
+        
+        # Scaled structures MD
+        if include_scaled:
+            total += self.collect_scaled_md(atoms, f"{name}_scaled", scale_factors)
+        
+        # Rattling
+        if include_rattling:
+            total += self.collect_rattling(atoms, f"{name}_rattle")
+        
+        # Strain
+        if include_strain:
+            total += self.collect_strain(atoms, f"{name}_strain")
+        
+        self._log(f"Diverse collection complete: {total} total structures")
+        return total
+
+
     def collect_heating_ramp(
         self,
         atoms: Atoms,
