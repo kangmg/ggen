@@ -332,3 +332,78 @@ def get_gulp_calculator(
         n_workers=n_workers,
         **kwargs,
     )
+
+
+def get_gfnff_calculator(
+    gulp_exe: Optional[str] = None,
+    gulp_lib: Optional[str] = None,
+    keywords: str = "conp gfnff gradients",
+    kspace: float = 0.01,
+    accuracy: Optional[float] = None,
+    options: Optional[List[str]] = None,
+    n_workers: Optional[int] = None,
+    **kwargs,
+) -> GULPCalculator:
+    """
+    Factory function to create pGFN-FF calculator.
+
+    pGFN-FF is a universal force field that auto-generates parameters
+    from topology - no traditional potential fitting required.
+
+    Reference:
+        Gale, LeBlanc, Spackman, Silvestri, Raiteri,
+        J. Chem. Theory Comput., 17, 7827 (2021)
+
+    Args:
+        gulp_exe: Path to GULP executable (default: from env)
+        gulp_lib: Path to GULP library directory (default: from env)
+        keywords: GULP keywords (default: "conp gfnff gradients")
+        kspace: k-space precision for periodic systems (default: 0.01)
+        accuracy: pGFN-FF accuracy parameter (optional, default: GULP's default)
+        options: Additional GULP options (will be extended with gfnff options)
+        n_workers: Concurrent GULP processes
+
+    Returns:
+        Configured GULPCalculator for pGFN-FF calculations
+
+    Example:
+        >>> calc = get_gfnff_calculator()
+        >>> atoms.calc = calc
+        >>> energy = atoms.get_potential_energy()
+        >>> forces = atoms.get_forces()
+
+        # Batch calculation
+        >>> calc = get_gfnff_calculator(n_workers=8)
+        >>> results = calc.calculate_batch(atoms_list)
+    """
+    # Build gfnff-specific options
+    gfnff_options = options.copy() if options else []
+    gfnff_options.append(f"gfnff_kspace {kspace}")
+    
+    if accuracy is not None:
+        gfnff_options.append(f"gfnff_accuracy {accuracy}")
+
+    # Build command
+    if gulp_exe:
+        gulp_command = f"{gulp_exe} < PREFIX.gin > PREFIX.got"
+    else:
+        gulp_command = os.environ.get("ASE_GULP_COMMAND")
+        if not gulp_command:
+            gulp_exe = os.environ.get("GULP_EXE")
+            if gulp_exe:
+                gulp_command = f"{gulp_exe} < PREFIX.gin > PREFIX.got"
+            else:
+                gulp_command = "gulp < PREFIX.gin > PREFIX.got"
+
+    if gulp_lib is None:
+        gulp_lib = os.environ.get("GULP_LIB", "")
+
+    return GULPCalculator(
+        gulp_command=gulp_command,
+        gulp_lib=gulp_lib,
+        keywords=keywords,
+        library=None,  # pGFN-FF doesn't use library files
+        options=gfnff_options,
+        n_workers=n_workers,
+        **kwargs,
+    )

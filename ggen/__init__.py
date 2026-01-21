@@ -24,7 +24,7 @@ from .report import SystemExplorer, SystemReport, StabilityStats, SpaceGroupStat
 from .utils import parse_chemical_formula
 
 # GULP integration
-from .gulp_calculator import GULPCalculator, get_gulp_calculator
+from .gulp_calculator import GULPCalculator, get_gulp_calculator, get_gfnff_calculator
 from .data_collector import DataCollector, TrainingData, collect_from_cif_files
 from .robust_pipeline import (
     RobustPipeline,
@@ -104,6 +104,7 @@ __all__ = [
     # GULP Calculator
     "GULPCalculator",
     "get_gulp_calculator",
+    "get_gfnff_calculator",
     # Data Collection
     "DataCollector",
     "TrainingData",
