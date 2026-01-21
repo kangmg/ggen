@@ -23,7 +23,7 @@ from ase.io import read, write
 from ase.md.langevin import Langevin
 from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 from ase.optimize import LBFGS, FIRE
-from ase.constraints import ExpCellFilter, StrainFilter
+from ase.filters import ExpCellFilter, StrainFilter
 from ase.calculators.calculator import Calculator
 from ase import units
 
