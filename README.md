@@ -295,6 +295,104 @@ GGen computes phase diagrams automatically using [pymatgen](https://pymatgen.org
 
 A promising synthesis candidate should be both thermodynamically stable (or nearly so) and dynamically stable. GGen lets you filter for exactly this.
 
+## MLIP Distillation to GULP Potentials
+
+GGen supports **knowledge distillation** from MLIPs (like ORB) to classical GULP potentials. This enables fast, large-scale simulations with MLIP-level accuracy.
+
+### Quick Start
+
+```python
+from ggen import get_orb_calculator, MLIPCollector, GULPFitter
+from ase.io import read
+
+# 1. Collect training data using ORB
+calc = get_orb_calculator(device="cuda")
+collector = MLIPCollector(calc, db_path="training.db")
+
+structures = [read(f) for f in Path("./cif_files").glob("*.cif")]
+collector.collect_all(structures, include_md=True, include_rattling=True)
+
+# 2. Fit GULP potential
+from ggen import fit_from_training_data
+result = fit_from_training_data("training.db", elements=["Nb", "W", "O"])
+result.save("NbWO.lib")
+```
+
+### Workflow Overview
+
+```
+CIF Files ──┐
+            ├──→ ORB Calculator ──→ ASE DB ──→ GULP Fitter ──→ .lib
+GGen Search ─┘                       │
+                                     ├─ Energy
+                                     ├─ Forces  
+                                     └─ Stress
+```
+
+### Data Collection Methods
+
+| Method | Description |
+|--------|-------------|
+| `collect_single_point()` | Single energy/force calculation |
+| `collect_md_temperatures()` | MD at multiple temperatures |
+| `collect_optimization()` | Geometry optimization trajectory |
+| `collect_rattling()` | Random atomic displacements |
+| `collect_strain()` | Volume/shear perturbations |
+| `collect_heating_ramp()` | Temperature ramping trajectory |
+
+### Supported Charge Models
+
+| Model | Description | Use Case |
+|-------|-------------|----------|
+| `ChargeModel.FIXED` | Static formal charges | Simple ionic |
+| `ChargeModel.SHELL` | Core-shell polarizable | Oxides, halides |
+| `ChargeModel.QEQ` | Charge equilibration | Reactive systems |
+| `ChargeModel.EEM` | Electronegativity equalization | General |
+
+### Example: Nb-W-O System
+
+```python
+from ggen import (
+    GULPFitter, PotentialConfig, ChargeModel, 
+    BuckinghamParams, QEqParams, FitTarget
+)
+from ase.db import connect
+
+# Load training data
+db = connect("training.db")
+targets = [
+    FitTarget(
+        name=f"s_{row.id}",
+        atoms=row.toatoms(),
+        energy=row.total_energy,
+        forces=row.data.get("forces"),
+    )
+    for row in db.select()
+]
+
+# Configure potential
+config = PotentialConfig(
+    charge_model=ChargeModel.QEQ,
+    buckingham={
+        ("Nb", "O"): BuckinghamParams(A=5000, rho=0.35),
+        ("W", "O"): BuckinghamParams(A=6000, rho=0.33),
+        ("O", "O"): BuckinghamParams(A=22000, rho=0.15, C=28),
+    },
+    qeq_params={
+        "Nb": QEqParams("Nb", chi=3.0, mu=6.0),
+        "W": QEqParams("W", chi=4.0, mu=7.0),
+        "O": QEqParams("O", chi=8.5, mu=13.0),
+    },
+)
+
+# Fit
+fitter = GULPFitter(gulp_command="/path/to/gulp")
+result = fitter.fit(config, targets, method="dual_annealing")
+fitter.save_library(result.config, "NbWO.lib")
+```
+
+See [tutorial notebook](examples/04_mlip_distillation.ipynb) for a complete walkthrough.
+
 ## Features
 
 - **Crystal Generation**: Generate structures from chemical formulas via PyXtal with automatic space group selection
