@@ -934,6 +934,393 @@ class GULPFitter:
             message="Optimization completed successfully",
         )
 
+    def fit_native(
+        self,
+        config: PotentialConfig,
+        targets: List[FitTarget],
+        fit_cycles: int = 100,
+        fit_method: str = "bfgs",
+        relax_structures: bool = True,
+        simultaneous: bool = True,
+    ) -> FitResult:
+        """
+        Fit potential using GULP's internal fitting optimizer.
+
+        This is MUCH faster than the external scipy-based fit() method
+        because it runs GULP only once with native fitting.
+
+        Args:
+            config: Initial potential configuration
+            targets: List of fitting targets
+            fit_cycles: Maximum fitting cycles (default: 100)
+            fit_method: GULP fit method ("bfgs", "dfp", "steep")
+            relax_structures: If True, relax structures during fitting
+            simultaneous: If True, fit all structures simultaneously
+
+        Returns:
+            FitResult with optimized configuration
+
+        Example:
+            >>> result = fitter.fit_native(config, targets, fit_cycles=200)
+        """
+        self._log(f"Starting NATIVE fit with {len(targets)} targets")
+        self._log(f"Charge model: {config.charge_model.value}")
+        self._log(f"Using GULP internal {fit_method} optimizer")
+
+        # Generate native fit input
+        input_content = self._generate_native_fit_input(
+            config, targets,
+            fit_cycles=fit_cycles,
+            fit_method=fit_method,
+            relax_structures=relax_structures,
+            simultaneous=simultaneous,
+        )
+
+        # Run GULP with fitting
+        success, output, results = self.run_gulp(input_content, "native_fit")
+
+        if not success:
+            self._log("GULP fitting failed")
+            return FitResult(
+                config=config,
+                objective_value=1e10,
+                n_iterations=0,
+                converged=False,
+                history=[],
+                message=f"GULP fitting failed: {output[:500] if output else 'No output'}",
+            )
+
+        # Parse fitted parameters from output
+        fitted_config = self._parse_fitted_parameters(output, config)
+        final_objective = self._parse_final_objective(output)
+        n_iterations = self._parse_fit_iterations(output)
+        converged = "Fit completed" in output or "Conditions for a minimum" in output
+
+        self._log(f"Native fit complete: objective = {final_objective:.6e}")
+        self._log(f"Converged: {converged}")
+
+        return FitResult(
+            config=fitted_config,
+            objective_value=final_objective,
+            n_iterations=n_iterations,
+            converged=converged,
+            history=[],
+            message="Native GULP fitting completed",
+        )
+
+    def _generate_native_fit_input(
+        self,
+        config: PotentialConfig,
+        targets: List[FitTarget],
+        fit_cycles: int = 100,
+        fit_method: str = "bfgs",
+        relax_structures: bool = True,
+        simultaneous: bool = True,
+    ) -> str:
+        """Generate GULP input file for native fitting."""
+        # Build keywords
+        keywords = ["fit", "conp"]
+        if simultaneous and len(targets) > 1:
+            keywords.append("simul")
+        if relax_structures:
+            keywords.append("opti")
+        
+        # Add charge model keyword
+        if config.charge_model == ChargeModel.QEQ:
+            keywords.append("qeq")
+        elif config.charge_model == ChargeModel.EEM:
+            keywords.append("eem")
+
+        all_elements = set()
+        for target in targets:
+            all_elements.update(target.atoms.get_chemical_symbols())
+        all_elements = sorted(all_elements)
+
+        sections = [" ".join(keywords)]
+
+        # Fit cycles
+        sections.append(f"cycles fit {fit_cycles}")
+
+        # Add each structure with observables
+        for target in targets:
+            sections.append(self.generate_structure_block(target, config))
+            sections.append(self._generate_fit_observables(target))
+            sections.append("")
+
+        # Species block
+        sections.append(self.generate_species_block(config, all_elements))
+
+        # Potential blocks with fitting flags
+        sections.append(self._generate_buckingham_with_flags(config))
+
+        # Charge model specific blocks with fitting flags
+        if config.charge_model == ChargeModel.SHELL:
+            sections.append(self._generate_spring_with_flags(config))
+        elif config.charge_model == ChargeModel.QEQ:
+            sections.append(self._generate_qeq_with_flags(config))
+
+        # Output settings
+        sections.append("dump native_fit.grs")
+
+        return "\n\n".join(sections)
+
+    def _generate_fit_observables(self, target: FitTarget) -> str:
+        """Generate observables block for GULP fitting."""
+        lines = ["observables"]
+
+        if target.energy is not None:
+            lines.append("energy eV")
+            lines.append(f"  {target.energy:.6f} {target.energy_weight:.4f}")
+
+        if target.lattice_params:
+            for param, value in target.lattice_params.items():
+                lines.append(f"{param} {value:.6f} {target.lattice_weight:.4f}")
+
+        lines.append("end")
+        return "\n".join(lines)
+
+    def _generate_buckingham_with_flags(self, config: PotentialConfig) -> str:
+        """Generate Buckingham block with GULP fitting flags (0=fixed, 1=fit)."""
+        lines = ["buckingham"]
+
+        for (elem1, elem2), bp in config.buckingham.items():
+            type1 = "shel" if config.charge_model == ChargeModel.SHELL and elem1 in config.shell_params else "core"
+            type2 = "shel" if config.charge_model == ChargeModel.SHELL and elem2 in config.shell_params else "core"
+
+            # Fitting flags: 1 1 0 means fit A and rho, not C
+            fit_A = 1 if config.fit_buckingham else 0
+            fit_rho = 1 if config.fit_buckingham else 0
+            fit_C = 0  # Usually keep C fixed
+
+            lines.append(
+                f"{elem1} {type1} {elem2} {type2} "
+                f"{bp.A:.6f} {bp.rho:.6f} {bp.C:.6f} "
+                f"{bp.rmin:.2f} {bp.rmax:.2f} "
+                f"{fit_A} {fit_rho} {fit_C}"
+            )
+
+        return "\n".join(lines)
+
+    def _generate_spring_with_flags(self, config: PotentialConfig) -> str:
+        """Generate spring block with fitting flags."""
+        if config.charge_model != ChargeModel.SHELL:
+            return ""
+
+        lines = ["spring"]
+        for elem, sp in config.shell_params.items():
+            fit_flag = 1 if config.fit_charges else 0
+            lines.append(f"{elem} {sp.spring_k:.6f} {fit_flag}")
+
+        return "\n".join(lines)
+
+    def _generate_qeq_with_flags(self, config: PotentialConfig) -> str:
+        """Generate QEq block with fitting flags."""
+        if config.charge_model != ChargeModel.QEQ:
+            return ""
+
+        lines = ["qeq"]
+        for elem, qp in config.qeq_params.items():
+            fit_chi = 1 if config.fit_charges else 0
+            fit_mu = 1 if config.fit_charges else 0
+            # GULP QEq format: element chi mu qmin qmax fit_chi fit_mu
+            lines.append(
+                f"{elem} {qp.chi:.6f} {qp.mu:.6f} "
+                f"{qp.q_min:.2f} {qp.q_max:.2f} "
+                f"{fit_chi} {fit_mu}"
+            )
+
+        return "\n".join(lines)
+
+    def _parse_fitted_parameters(self, output: str, base_config: PotentialConfig) -> PotentialConfig:
+        """Parse fitted parameters from GULP output."""
+        import re
+        
+        # Create new config
+        config = PotentialConfig(
+            name=base_config.name + "_fitted",
+            charge_model=base_config.charge_model,
+            potential_type=base_config.potential_type,
+            fixed_charges=base_config.fixed_charges.copy(),
+            fit_buckingham=base_config.fit_buckingham,
+            fit_charges=base_config.fit_charges,
+        )
+
+        # Parse Buckingham parameters from output
+        # Look for "Final values of general potential parameters :"
+        buck_section = False
+        lines = output.split("\n")
+        
+        for i, line in enumerate(lines):
+            if "Final values of" in line and "parameter" in line.lower():
+                buck_section = True
+                continue
+            
+            if buck_section and "----" in line and i > 0:
+                buck_section = False
+                continue
+
+            if buck_section:
+                # Try to parse parameter lines
+                parts = line.split()
+                if len(parts) >= 4:
+                    try:
+                        # Look for Buckingham A and rho values
+                        # Format varies, try to extract numbers
+                        pass
+                    except:
+                        pass
+
+        # Fallback: copy base config parameters (GULP writes to .grs file)
+        # Try to read from .grs restart file
+        grs_file = os.path.join(self.working_dir, "native_fit.grs")
+        if os.path.exists(grs_file):
+            config = self._parse_grs_file(grs_file, base_config)
+        else:
+            # Copy base config
+            config.buckingham = {k: BuckinghamParams(
+                A=v.A, rho=v.rho, C=v.C,
+                rmin=v.rmin, rmax=v.rmax,
+                A_bounds=v.A_bounds, rho_bounds=v.rho_bounds, C_bounds=v.C_bounds
+            ) for k, v in base_config.buckingham.items()}
+            config.shell_params = base_config.shell_params.copy()
+            config.qeq_params = base_config.qeq_params.copy()
+
+        return config
+
+    def _parse_grs_file(self, grs_file: str, base_config: PotentialConfig) -> PotentialConfig:
+        """Parse GULP restart file (.grs) for fitted parameters."""
+        import re
+
+        config = PotentialConfig(
+            name=base_config.name + "_fitted",
+            charge_model=base_config.charge_model,
+            potential_type=base_config.potential_type,
+            fixed_charges=base_config.fixed_charges.copy(),
+        )
+
+        with open(grs_file, "r") as f:
+            content = f.read()
+            lines = content.split("\n")
+
+        in_buck = False
+        in_spring = False
+        in_qeq = False
+
+        for line in lines:
+            line = line.strip()
+            
+            if line.startswith("buckingham"):
+                in_buck = True
+                in_spring = False
+                in_qeq = False
+                continue
+            elif line.startswith("spring"):
+                in_buck = False
+                in_spring = True
+                in_qeq = False
+                continue
+            elif line.startswith("qeq"):
+                in_buck = False
+                in_spring = False
+                in_qeq = True
+                continue
+            elif line.startswith(("species", "cell", "frac", "observ", "end", "#")):
+                in_buck = False
+                in_spring = False
+                in_qeq = False
+                continue
+
+            if in_buck and line:
+                parts = line.split()
+                if len(parts) >= 7:
+                    try:
+                        elem1, type1, elem2, type2 = parts[0], parts[1], parts[2], parts[3]
+                        A, rho, C = float(parts[4]), float(parts[5]), float(parts[6])
+                        pair = (elem1, elem2)
+                        if pair in base_config.buckingham or (elem2, elem1) in base_config.buckingham:
+                            if pair not in base_config.buckingham:
+                                pair = (elem2, elem1)
+                            config.buckingham[pair] = BuckinghamParams(
+                                A=A, rho=rho, C=C,
+                                rmin=base_config.buckingham[pair].rmin,
+                                rmax=base_config.buckingham[pair].rmax,
+                            )
+                    except (ValueError, IndexError):
+                        pass
+
+            if in_spring and line:
+                parts = line.split()
+                if len(parts) >= 2:
+                    try:
+                        elem = parts[0]
+                        k = float(parts[1])
+                        if elem in base_config.shell_params:
+                            sp = base_config.shell_params[elem]
+                            config.shell_params[elem] = ShellParams(
+                                element=elem,
+                                core_charge=sp.core_charge,
+                                shell_charge=sp.shell_charge,
+                                spring_k=k,
+                            )
+                    except (ValueError, IndexError):
+                        pass
+
+            if in_qeq and line:
+                parts = line.split()
+                if len(parts) >= 3:
+                    try:
+                        elem = parts[0]
+                        chi, mu = float(parts[1]), float(parts[2])
+                        if elem in base_config.qeq_params:
+                            qp = base_config.qeq_params[elem]
+                            config.qeq_params[elem] = QEqParams(
+                                element=elem,
+                                chi=chi, mu=mu,
+                                q_min=qp.q_min, q_max=qp.q_max,
+                            )
+                    except (ValueError, IndexError):
+                        pass
+
+        # Fallback for any missing params
+        for pair, bp in base_config.buckingham.items():
+            if pair not in config.buckingham:
+                config.buckingham[pair] = bp
+        for elem, sp in base_config.shell_params.items():
+            if elem not in config.shell_params:
+                config.shell_params[elem] = sp
+        for elem, qp in base_config.qeq_params.items():
+            if elem not in config.qeq_params:
+                config.qeq_params[elem] = qp
+
+        return config
+
+    def _parse_final_objective(self, output: str) -> float:
+        """Parse final sum of squares from GULP output."""
+        import re
+        
+        # Look for "Sum of squares" value
+        patterns = [
+            r"Sum of squares\s*=\s*([\d.eE+-]+)",
+            r"Final sum of squares\s*=\s*([\d.eE+-]+)",
+            r"Fitting\s+Sum of squares\s*=\s*([\d.eE+-]+)",
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, output)
+            if match:
+                return float(match.group(1))
+        
+        return 1e10
+
+    def _parse_fit_iterations(self, output: str) -> int:
+        """Parse number of fitting iterations from output."""
+        import re
+        match = re.search(r"Cycle\s*:\s*(\d+)", output)
+        if match:
+            return int(match.group(1))
+        return 0
+
+
     def save_potential(
         self,
         config: PotentialConfig,

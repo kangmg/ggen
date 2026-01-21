@@ -68,9 +68,14 @@ dev = [
 ]
 docs = ["sphinx>=4.0", "sphinx-rtd-theme>=1.0", "myst-parser>=0.15"]
 jupyter = ["jupyter>=1.0", "ipywidgets>=7.0", "matplotlib>=3.0", "plotly>=5.0"]
+fingerprint = [
+    "dscribe>=2.1.0",
+    "matminer>=0.9.0",
+]
 full = [
     "ggen[orb]",
     "ggen[jupyter]",
+    "ggen[fingerprint]",
 ]
 
 [project.urls]

@@ -73,6 +73,14 @@ from .mlip_collector import (
     collect_for_gulp_fitting,
 )
 
+# Duplicate Filtering
+from .duplicate_filter import (
+    DuplicateFilter,
+    FilterConfig,
+    FilterResult,
+    filter_training_data,
+)
+
 __version__ = "0.1.0"
 __author__ = "Matt Moderwell"
 __email__ = "matt@ouro.foundation"
@@ -154,6 +162,11 @@ __all__ = [
     "CollectionStats",
     "collect_from_cif_directory",
     "collect_for_gulp_fitting",
+    # Duplicate Filtering
+    "DuplicateFilter",
+    "FilterConfig",
+    "FilterResult",
+    "filter_training_data",
 ]
 
 
