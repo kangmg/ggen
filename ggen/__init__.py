@@ -54,6 +54,15 @@ from .gulp_fitter import (
     fit_from_training_data,
 )
 
+# QEq Parameters Database
+from .qeq_params import (
+    QEQ_PARAMS_DATABASE,
+    QEqElementParams,
+    get_qeq_params,
+    get_qeq_params_for_elements,
+    build_qeq_config,
+)
+
 # MLIP Data Collection with ASE DB
 from .mlip_collector import (
     MLIPCollector,
@@ -132,6 +141,12 @@ __all__ = [
     "create_nbwo_shell_config",
     "create_nbwo_qeq_config",
     "fit_from_training_data",
+    # QEq Parameters Database
+    "QEQ_PARAMS_DATABASE",
+    "QEqElementParams",
+    "get_qeq_params",
+    "get_qeq_params_for_elements",
+    "build_qeq_config",
     # MLIP Data Collection
     "MLIPCollector",
     "CollectionConfig",
