@@ -3,8 +3,15 @@ import os
 import sys
 from pathlib import Path
 
-from orb_models.forcefield import pretrained
-from orb_models.forcefield.calculator import ORBCalculator
+# Optional dependency: orb_models
+try:
+    from orb_models.forcefield import pretrained
+    from orb_models.forcefield.calculator import ORBCalculator
+    HAS_ORB_MODELS = True
+except ImportError:
+    HAS_ORB_MODELS = False
+    pretrained = None
+    ORBCalculator = None
 
 # Default models path - can be overridden via environment variable
 MODELS_PATH = Path(os.environ.get("ORB_MODELS_PATH", Path.home() / ".orb_models"))
@@ -40,7 +47,18 @@ def get_orb_calculator(
 
     Returns:
         ORBCalculator instance configured for the specified device.
+    
+    Raises:
+        ImportError: If orb_models package is not installed.
     """
+    if not HAS_ORB_MODELS:
+        raise ImportError(
+            "orb_models is not installed. Install it with:\n"
+            "  pip install orb-models\n"
+            "or install ggen with orb support:\n"
+            "  pip install ggen[orb]"
+        )
+
     # Auto-detect device if not specified
     if device is None:
         device = _detect_device()
@@ -73,3 +91,4 @@ def get_orb_calculator(
     except Exception as e:
         logger.error("Error loading ORB calculator: %s", e)
         raise RuntimeError(f"Failed to load ORB calculator: {str(e)}") from e
+
