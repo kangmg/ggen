@@ -159,8 +159,14 @@ class MLIPCollector:
             config: Collection configuration
         """
         self.calculator = calculator
-        self.db_path = db_path
-        self.config = config or CollectionConfig(db_path=db_path)
+        
+        # Use config.db_path if config is provided, otherwise use db_path parameter
+        if config is not None:
+            self.config = config
+            self.db_path = config.db_path
+        else:
+            self.db_path = db_path
+            self.config = CollectionConfig(db_path=db_path)
 
         # Initialize database
         self.db = connect(self.db_path)
