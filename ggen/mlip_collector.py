@@ -549,6 +549,147 @@ class MLIPCollector:
         self._log(f"Diverse collection complete: {total} total structures")
         return total
 
+    def collect_sheared_md(
+        self,
+        atoms: Atoms,
+        name: str = "sheared_md",
+        shear_magnitudes: Optional[List[float]] = None,
+        shear_components: Optional[List[tuple]] = None,
+        temperatures: Optional[List[float]] = None,
+        n_steps: Optional[int] = None,
+        relax_sheared: bool = True,
+        relax_steps: int = 50,
+    ) -> int:
+        """
+        Collect MD trajectories on shear-strained structures.
+
+        Applies shear strain to the cell, optionally relaxes, then runs MD
+        at various temperatures. Good for sampling configurations under
+        shear stress conditions.
+
+        Args:
+            atoms: Initial structure
+            name: Base name for trajectories
+            shear_magnitudes: List of shear strain magnitudes (default: [-0.05, -0.02, 0.02, 0.05])
+            shear_components: List of shear components as (i, j) tuples 
+                             (default: [(0,1), (0,2), (1,2)] for xy, xz, yz)
+            temperatures: List of temperatures (K)
+            n_steps: MD steps per configuration
+            relax_sheared: Whether to relax sheared structures before MD
+            relax_steps: Relaxation steps if relax_sheared=True
+
+        Returns:
+            Total structures collected
+
+        Example:
+            >>> collector.collect_sheared_md(atoms, shear_magnitudes=[-0.05, 0.05])
+        """
+        if shear_magnitudes is None:
+            shear_magnitudes = [-0.05, -0.02, 0.02, 0.05]
+        if shear_components is None:
+            shear_components = [(0, 1), (0, 2), (1, 2)]  # xy, xz, yz
+        
+        temperatures = temperatures or self.config.md_temperatures
+        n_steps = n_steps or self.config.md_steps_per_temp // 2
+        
+        total = 0
+        component_names = {(0, 1): "xy", (0, 2): "xz", (1, 2): "yz"}
+        
+        self._log(f"Sheared MD: {len(shear_magnitudes)} magnitudes × {len(shear_components)} components × {len(temperatures)} temps")
+        
+        for comp in shear_components:
+            comp_name = component_names.get(comp, f"{comp[0]}{comp[1]}")
+            
+            for shear in shear_magnitudes:
+                # Apply shear strain
+                sheared_atoms = atoms.copy()
+                cell = sheared_atoms.get_cell().copy()
+                
+                # Apply shear: cell[i, j] += shear * cell[j, j]
+                i, j = comp
+                cell[i, j] += shear * cell[j, j]
+                sheared_atoms.set_cell(cell, scale_atoms=True)
+                
+                shear_name = f"{name}_{comp_name}_s{shear:.3f}"
+                self._log(f"  Shear {comp_name}={shear:.3f}")
+                
+                # Optionally relax
+                if relax_sheared:
+                    try:
+                        sheared_atoms.calc = self.calculator
+                        from ase.optimize import LBFGS
+                        opt = LBFGS(sheared_atoms, logfile=None)
+                        opt.run(fmax=0.5, steps=relax_steps)
+                        
+                        metadata = {"shear_component": comp_name, "shear_magnitude": shear, "relaxed": True}
+                        if self._calculate_and_store(
+                            sheared_atoms, CollectionMode.OPTIMIZATION,
+                            f"{shear_name}_relaxed", metadata
+                        ):
+                            total += 1
+                            self.stats.opt_structures += 1
+                    except Exception as e:
+                        self._log(f"    Relaxation failed: {e}")
+                
+                # Run MD on sheared structure
+                for temp in temperatures:
+                    traj_name = f"{shear_name}_T{temp:.0f}K"
+                    collected = self.collect_md_trajectory(
+                        sheared_atoms, temp, n_steps, traj_name
+                    )
+                    total += collected
+        
+        self._log(f"  Total from sheared MD: {total} structures")
+        return total
+
+    def collect_comprehensive(
+        self,
+        atoms: Atoms,
+        name: str = "comprehensive",
+        include_original: bool = True,
+        include_scaled: bool = True,
+        include_sheared: bool = True,
+        include_rattling: bool = True,
+        include_strain: bool = True,
+        scale_factors: Optional[List[float]] = None,
+        shear_magnitudes: Optional[List[float]] = None,
+    ) -> int:
+        """
+        Most comprehensive data collection combining all methods.
+
+        Args:
+            atoms: Initial structure
+            name: Base name
+            include_original: MD on original structure
+            include_scaled: MD on volume-scaled structures
+            include_sheared: MD on shear-strained structures
+            include_rattling: Random displacements
+            include_strain: Strain perturbations
+
+        Returns:
+            Total structures collected
+        """
+        total = 0
+        
+        self._log(f"Comprehensive collection for: {name}")
+        
+        if include_original:
+            total += self.collect_md_temperatures(atoms, f"{name}_orig")
+        
+        if include_scaled:
+            total += self.collect_scaled_md(atoms, f"{name}_scaled", scale_factors)
+        
+        if include_sheared:
+            total += self.collect_sheared_md(atoms, f"{name}_sheared", shear_magnitudes)
+        
+        if include_rattling:
+            total += self.collect_rattling(atoms, f"{name}_rattle")
+        
+        if include_strain:
+            total += self.collect_strain(atoms, f"{name}_strain")
+        
+        self._log(f"Comprehensive collection complete: {total} total structures")
+        return total
 
     def collect_heating_ramp(
         self,
