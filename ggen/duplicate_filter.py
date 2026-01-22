@@ -133,6 +133,7 @@ class DuplicateFilter:
             sigma=self.config.soap_sigma,
             periodic=True,
             sparse=False,
+            average=self.config.soap_average,
         )
         self._log(f"SOAP initialized: species={self._species}, r_cut={self.config.soap_r_cut}")
     
@@ -181,7 +182,7 @@ class DuplicateFilter:
             # Reinitialize with new species
             self._init_soap(list(atom_species | set(self._species)))
         
-        descriptor = self._soap.create(atoms, average=self.config.soap_average)
+        descriptor = self._soap.create(atoms)
         return descriptor.flatten()
     
     def _get_coulomb_fingerprint(self, atoms: Atoms) -> np.ndarray:
