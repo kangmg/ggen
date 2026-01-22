@@ -51,6 +51,7 @@ dependencies = [
     "phonopy>=2.20.0",
     "matplotlib>=3.0",
     "seekpath>=2.0",
+    "scikit-learn",
 ]
 
 [project.optional-dependencies]
