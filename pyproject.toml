@@ -75,11 +75,6 @@ jupyter = ["jupyter>=1.0", "ipywidgets>=7.0", "matplotlib>=3.0", "plotly>=5.0"]
 fingerprint = [
     "dscribe>=2.1.0",
     "matminer>=0.9.0",
-]
-
-fingerprint = [
-    "dscribe>=2.1.0",
-    "matminer>=0.9.0",
     "numba>=0.59.0",
     "llvmlite>=0.42.0",
 ]
